@@ -1,286 +1,41 @@
-(() => {
-  'use strict';
-
-  const STORAGE_KEY = 'runlu_invoice_alpha_business_v2';
-  const LEGACY_KEY = 'runlu_invoice_alpha_business_v1';
-  const app = document.getElementById('app');
-  let step = 0;
-  let mode = 'setup';
-
-  const today = new Date();
-  const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-
-  const DEFAULTS = {
-    companyName: '', legalName: '', businessNumber: '', email: '', phone: '', address: '', website: '',
-    logo: '', primaryColor: '#2563eb', country: 'Canada', currency: 'CAD', language: 'English', dateFormat: 'MMMM D, YYYY',
-    billingPeriod: defaultMonth,
-    invoiceDate: '',
-    sendDate: '',
-    reminderTime: '07:00',
-    followUpTime: '10:00',
-    weekendRule: 'previous-friday',
-    holidayRule: 'previous-business-day',
-    previousInvoiceNumber: '0',
-    invoicePrefix: '',
-    createdAt: '', updatedAt: ''
-  };
-
-  let draft = loadBusiness() || {...DEFAULTS};
-  normalizeDraft();
-
-  function loadBusiness() {
-    try {
-      const current = localStorage.getItem(STORAGE_KEY);
-      if (current) return JSON.parse(current);
-      const legacy = localStorage.getItem(LEGACY_KEY);
-      return legacy ? {...DEFAULTS, ...JSON.parse(legacy)} : null;
-    } catch { return null; }
-  }
-
-  function normalizeDraft() {
-    draft = {...DEFAULTS, ...draft};
-    if (!draft.billingPeriod) draft.billingPeriod = defaultMonth;
-    if (!draft.invoiceDate || !draft.sendDate) recalculateDates(false);
-  }
-
-  function saveBusiness() {
-    const now = new Date().toISOString();
-    draft.createdAt ||= now;
-    draft.updatedAt = now;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
-    applyBrand();
-  }
-
-  function applyBrand() {
-    document.documentElement.style.setProperty('--brand', draft.primaryColor || '#2563eb');
-  }
-
-  function esc(v='') {
-    return String(v).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-  }
-
-  function parseLocalDate(value) {
-    if (!value) return null;
-    const [y,m,d] = value.split('-').map(Number);
-    return new Date(y, m - 1, d, 12, 0, 0);
-  }
-
-  function toDateInput(date) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth()+1).padStart(2,'0');
-    const d = String(date.getDate()).padStart(2,'0');
-    return `${y}-${m}-${d}`;
-  }
-
-  function monthEnd(period) {
-    const [y,m] = period.split('-').map(Number);
-    return new Date(y, m, 0, 12, 0, 0);
-  }
-
-  function applyWeekendRule(date, rule) {
-    const d = new Date(date);
-    const day = d.getDay();
-    if (rule === 'exact-date') return d;
-    if (rule === 'previous-friday') {
-      if (day === 6) d.setDate(d.getDate() - 1);
-      if (day === 0) d.setDate(d.getDate() - 2);
-    } else if (rule === 'next-monday') {
-      if (day === 6) d.setDate(d.getDate() + 2);
-      if (day === 0) d.setDate(d.getDate() + 1);
-    }
-    return d;
-  }
-
-  function recalculateDates(overwrite = true) {
-    const natural = monthEnd(draft.billingPeriod || defaultMonth);
-    const adjusted = applyWeekendRule(natural, draft.weekendRule || 'previous-friday');
-    if (overwrite || !draft.invoiceDate) draft.invoiceDate = toDateInput(adjusted);
-    if (overwrite || !draft.sendDate) draft.sendDate = toDateInput(adjusted);
-  }
-
-  function formatDate(value) {
-    const date = parseLocalDate(value);
-    if (!date) return 'Not set';
-    const locale = draft.language === 'French' ? 'fr-CA' : draft.language === 'Chinese' ? 'zh-CN' : 'en-CA';
-    const options = draft.dateFormat === 'YYYY-MM-DD'
-      ? {year:'numeric', month:'2-digit', day:'2-digit'}
-      : draft.dateFormat === 'MM/DD/YYYY'
-      ? {year:'numeric', month:'2-digit', day:'2-digit'}
-      : {year:'numeric', month:'long', day:'numeric', weekday:'long'};
-    if (draft.dateFormat === 'YYYY-MM-DD') return value;
-    if (draft.dateFormat === 'MM/DD/YYYY') {
-      const [y,m,d] = value.split('-'); return `${m}/${d}/${y}`;
-    }
-    if (draft.dateFormat === 'DD/MM/YYYY') {
-      const [y,m,d] = value.split('-'); return `${d}/${m}/${y}`;
-    }
-    return new Intl.DateTimeFormat(locale, options).format(date);
-  }
-
-  function formatMonth(period) {
-    const [y,m] = period.split('-').map(Number);
-    return new Intl.DateTimeFormat(draft.language === 'Chinese' ? 'zh-CN' : 'en-CA', {month:'long', year:'numeric'}).format(new Date(y,m-1,1));
-  }
-
-  function progress(active) {
-    return `<div class="progress" aria-label="Setup progress">${[1,2,3,4,5].map(i=>`<span class="${i<=active?'active':''}"></span>`).join('')}</div>`;
-  }
-
-  function shell(content) {
-    app.innerHTML = `<section class="center-page"><div class="panel">${content}</div></section>`;
-  }
-
-  function setStep(next) {
-    step = next;
-    render();
-    window.scrollTo({top:0, behavior:'smooth'});
-  }
-
-  function readForm() {
-    document.querySelectorAll('[data-field]').forEach(el => {
-      draft[el.dataset.field] = (el.value ?? '').trim();
-    });
-  }
-
-  function requireCompany() {
-    const input = document.querySelector('[data-field="companyName"]');
-    if (!input.value.trim()) {
-      input.focus();
-      input.setCustomValidity('Company name is required.');
-      input.reportValidity();
-      input.setCustomValidity('');
-      return false;
-    }
-    return true;
-  }
-
-  function renderWelcome() {
-    shell(`<div class="brand-mark">RL</div><div class="eyebrow">RUNLU</div><h1>Invoice Automation</h1><p>Set up your business once. Prepare recurring invoices with less typing and fewer repeated steps.</p><div class="actions"><button class="primary" id="startBtn">Get Started</button></div><p class="small">Alpha Build 002 · Your data stays on this device.</p>`);
-    document.getElementById('startBtn').onclick = () => setStep(1);
-  }
-
-  function renderBusiness() {
-    shell(`${progress(1)}<div class="eyebrow">Step 1 of 5</div><h2>Business information</h2><p>Start with the details needed to identify your business. You can edit them later.</p><div class="form-grid"><div class="field"><label>Company name *</label><input data-field="companyName" value="${esc(draft.companyName)}" autocomplete="organization" /></div><div class="field"><label>Legal name <span class="small">(optional)</span></label><input data-field="legalName" value="${esc(draft.legalName)}" /></div><div class="field"><label>Business number <span class="small">(optional)</span></label><input data-field="businessNumber" value="${esc(draft.businessNumber)}" /></div></div><div class="actions"><button class="primary" id="nextBtn">Next</button><button class="ghost" id="backBtn">Back</button></div>`);
-    document.getElementById('nextBtn').onclick = () => { if (!requireCompany()) return; readForm(); setStep(2); };
-    document.getElementById('backBtn').onclick = () => setStep(0);
-  }
-
-  function renderBranding() {
-    const logo = draft.logo ? `<img src="${draft.logo}" alt="Business logo preview" />` : 'Logo preview';
-    shell(`${progress(2)}<div class="eyebrow">Step 2 of 5</div><h2>Branding</h2><p>Add a logo and choose a primary color. Both can be changed later.</p><div class="form-grid"><div class="field"><label>Business logo</label><div class="logo-preview" id="logoPreview">${logo}</div><input type="file" id="logoInput" accept="image/*" /></div><div class="field"><label>Primary color</label><div class="color-row">${['#2563eb','#0f766e','#7c3aed','#111827'].map(c=>`<button type="button" class="color-swatch ${draft.primaryColor===c?'selected':''}" data-color="${c}" style="background:${c}" aria-label="Choose ${c}"></button>`).join('')}</div></div></div><div class="actions"><button class="primary" id="nextBtn">Next</button><button class="ghost" id="backBtn">Back</button></div>`);
-    document.querySelectorAll('[data-color]').forEach(btn => btn.onclick = () => { draft.primaryColor = btn.dataset.color; applyBrand(); renderBranding(); });
-    document.getElementById('logoInput').onchange = e => {
-      const file = e.target.files?.[0]; if (!file) return;
-      if (file.size > 2_000_000) { alert('Please choose an image smaller than 2 MB.'); return; }
-      const reader = new FileReader(); reader.onload = () => { draft.logo = reader.result; renderBranding(); }; reader.readAsDataURL(file);
-    };
-    document.getElementById('nextBtn').onclick = () => setStep(3);
-    document.getElementById('backBtn').onclick = () => setStep(1);
-  }
-
-  function renderRegional() {
-    shell(`${progress(3)}<div class="eyebrow">Step 3 of 5</div><h2>Regional settings</h2><p>Choose the defaults used for dates and currency.</p><div class="form-grid"><div class="grid-2"><div class="field"><label>Country</label><select data-field="country"><option>Canada</option><option>United States</option><option>United Kingdom</option><option>Australia</option><option>Other</option></select></div><div class="field"><label>Currency</label><select data-field="currency"><option>CAD</option><option>USD</option><option>GBP</option><option>AUD</option><option>EUR</option></select></div></div><div class="grid-2"><div class="field"><label>Language</label><select data-field="language"><option>English</option><option>French</option><option>Chinese</option></select></div><div class="field"><label>Date format</label><select data-field="dateFormat"><option>MMMM D, YYYY</option><option>YYYY-MM-DD</option><option>MM/DD/YYYY</option><option>DD/MM/YYYY</option></select></div></div></div><div class="actions"><button class="primary" id="nextBtn">Next</button><button class="ghost" id="backBtn">Back</button></div>`);
-    ['country','currency','language','dateFormat'].forEach(k => document.querySelector(`[data-field="${k}"]`).value = draft[k]);
-    document.getElementById('nextBtn').onclick = () => { readForm(); setStep(4); };
-    document.getElementById('backBtn').onclick = () => setStep(2);
-  }
-
-  function renderBilling() {
-    shell(`${progress(4)}<div class="eyebrow">Step 4 of 5</div><h2>Billing preferences</h2><p>Set the billing period, dates, reminder times and invoice numbering. Every value can be changed later.</p>
-      <div class="form-grid">
-        <div class="grid-2">
-          <div class="field"><label>Billing period</label><input type="month" data-field="billingPeriod" value="${esc(draft.billingPeriod)}" /></div>
-          <div class="field"><label>Weekend rule</label><select data-field="weekendRule"><option value="previous-friday">Move to previous Friday</option><option value="next-monday">Move to next Monday</option><option value="exact-date">Keep exact date</option></select></div>
-        </div>
-        <div class="grid-2">
-          <div class="field"><label>Invoice date</label><input type="date" data-field="invoiceDate" value="${esc(draft.invoiceDate)}" /></div>
-          <div class="field"><label>Send date</label><input type="date" data-field="sendDate" value="${esc(draft.sendDate)}" /></div>
-        </div>
-        <button type="button" class="secondary compact" id="calcDatesBtn">Recalculate from month end</button>
-        <div class="grid-2">
-          <div class="field"><label>First reminder</label><input type="time" data-field="reminderTime" value="${esc(draft.reminderTime)}" /></div>
-          <div class="field"><label>Follow-up reminder</label><input type="time" data-field="followUpTime" value="${esc(draft.followUpTime)}" /></div>
-        </div>
-        <div class="grid-2">
-          <div class="field"><label>Previous invoice number</label><input inputmode="numeric" pattern="[0-9]*" data-field="previousInvoiceNumber" value="${esc(draft.previousInvoiceNumber)}" /></div>
-          <div class="field"><label>Invoice prefix <span class="small">(optional)</span></label><input data-field="invoicePrefix" value="${esc(draft.invoicePrefix)}" placeholder="INV-" /></div>
-        </div>
-        <div class="preview-strip" id="numberPreview"></div>
-      </div>
-      <div class="actions"><button class="primary" id="finishBtn">Finish Setup</button><button class="ghost" id="backBtn">Back</button></div>`);
-
-    document.querySelector('[data-field="weekendRule"]').value = draft.weekendRule;
-    const fields = [...document.querySelectorAll('[data-field]')];
-    const updatePreview = () => {
-      readForm();
-      const n = Math.max(0, parseInt(draft.previousInvoiceNumber || '0',10) || 0);
-      const p = draft.invoicePrefix || '';
-      document.getElementById('numberPreview').innerHTML = `<strong>Next numbers:</strong> ${esc(p + (n+1))} · ${esc(p + (n+2))}`;
-    };
-    fields.forEach(el => el.addEventListener('input', updatePreview));
-    updatePreview();
-    document.getElementById('calcDatesBtn').onclick = () => {
-      readForm(); recalculateDates(true); renderBilling();
-    };
-    document.getElementById('finishBtn').onclick = () => { readForm(); saveBusiness(); setStep(5); };
-    document.getElementById('backBtn').onclick = () => setStep(3);
-  }
-
-  function renderSuccess() {
-    shell(`${progress(5)}<div class="brand-mark">✓</div><div class="eyebrow">Setup complete</div><h2>Your business is ready.</h2><p><strong>${esc(draft.companyName)}</strong> is now active. Billing dates and invoice numbering can be edited at any time.</p><div class="actions"><button class="primary" id="continueBtn">Open Dashboard</button></div>`);
-    document.getElementById('continueBtn').onclick = renderDashboard;
-  }
-
-  function billingSummaryCard() {
-    const natural = monthEnd(draft.billingPeriod);
-    const naturalText = formatDate(toDateInput(natural));
-    const next = Math.max(0, parseInt(draft.previousInvoiceNumber || '0',10) || 0) + 1;
-    return `<article class="card billing-card">
-      <div class="card-row"><div><div class="eyebrow">Current billing period</div><h2>${esc(formatMonth(draft.billingPeriod))}</h2></div><span class="status">Preparing</span></div>
-      <div class="summary-grid">
-        <div><span>Natural month end</span><strong>${esc(naturalText)}</strong></div>
-        <div><span>Invoice date</span><strong>${esc(formatDate(draft.invoiceDate))}</strong></div>
-        <div><span>Send date</span><strong>${esc(formatDate(draft.sendDate))}</strong></div>
-        <div><span>Reminder</span><strong>${esc(draft.reminderTime)}</strong></div>
-      </div>
-      <div class="notice success-note">Send day: <strong>${esc(formatDate(draft.sendDate))}</strong>. Prepare the package before then.</div>
-      <div class="number-line"><span>Next invoice number</span><strong>${esc((draft.invoicePrefix || '') + next)}</strong></div>
-      <button class="secondary" id="editBillingBtn">Edit billing preferences</button>
-    </article>`;
-  }
-
-  function renderDashboard() {
-    applyBrand();
-    const logo = draft.logo ? `<img src="${draft.logo}" alt="${esc(draft.companyName)} logo" />` : esc((draft.companyName || 'R').slice(0,2).toUpperCase());
-    app.innerHTML = `<header class="topbar"><div class="company"><div class="company-logo">${logo}</div><div><strong>${esc(draft.companyName)}</strong><div class="small">Invoice Automation</div></div></div><button class="icon-btn" id="settingsBtn" aria-label="Business settings">⚙</button></header>
-      <section class="hero"><div class="eyebrow" style="color:rgba(255,255,255,.85)">Alpha Build 002</div><h2>Business setup complete</h2><p>Your business and billing preferences are ready. Customer Manager arrives in the next build.</p></section>
-      <section class="cards">
-        ${billingSummaryCard()}
-        <article class="card"><div class="card-row"><div><strong>Business profile</strong><p class="small">${esc(draft.country)} · ${esc(draft.currency)} · ${esc(draft.dateFormat)}</p></div><span class="status">Ready</span></div></article>
-        <article class="card"><div class="empty"><h2>No customers yet</h2><p>Build 003 will add customer profiles and recurring billing schedules.</p><button class="secondary" id="previewBtn">Preview next step</button></div></article>
-        <article class="card"><div class="card-row"><div><strong>Local data</strong><p class="small">Saved on this device only.</p></div><button class="ghost" id="exportBtn" style="width:auto">Export</button></div></article>
-      </section>`;
-    document.getElementById('settingsBtn').onclick = () => { mode='edit'; step = 1; render(); };
-    document.getElementById('editBillingBtn').onclick = () => { mode='edit'; step = 4; render(); };
-    document.getElementById('previewBtn').onclick = () => alert('Next build: Customer Manager + Recurring Billing.');
-    document.getElementById('exportBtn').onclick = exportProfile;
-  }
-
-  function exportProfile() {
-    const blob = new Blob([JSON.stringify(draft, null, 2)], {type:'application/json'});
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'runlu-business-profile.json'; a.click(); URL.revokeObjectURL(a.href);
-  }
-
-  function render() {
-    applyBrand();
-    if (step === 0) renderWelcome();
-    else if (step === 1) renderBusiness();
-    else if (step === 2) renderBranding();
-    else if (step === 3) renderRegional();
-    else if (step === 4) renderBilling();
-    else renderSuccess();
-  }
-
-  if (loadBusiness()?.companyName) renderDashboard(); else render();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('service-worker.js').catch(()=>{});
+(()=>{'use strict';
+const STORAGE_KEY='runlu_invoice_build003_workspace';
+const app=document.getElementById('app');
+const today=new Date();
+const defaultPeriod=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+const defaults={workspaceName:'',companyName:'',legalName:'',businessNumber:'',taxNumber:'',email:'',phone:'',website:'',address:'',city:'',region:'',postalCode:'',country:'Canada',currency:'CAD',language:'English',dateFormat:'MMMM D, YYYY',logo:'',primaryColor:'#2457d6',billingCycle:'Monthly',billingPeriod:defaultPeriod,invoiceRule:'Last Business Day',fixedInvoiceDay:'',sendRule:'Same Day',reminderDays:'2',reminderTime:'09:00',weekendRule:'Previous Friday',holidayRule:'Previous Business Day',invoicePrefix:'',previousInvoiceNumber:'0',autoIncrement:true,createdAt:'',updatedAt:''};
+let data=load()||{...defaults}; let screen=load()? 'dashboard':'welcome';
+function load(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'null')}catch{return null}}
+function save(){const now=new Date().toISOString();data.createdAt||=now;data.updatedAt=now;localStorage.setItem(STORAGE_KEY,JSON.stringify(data));applyBrand()}
+function applyBrand(){document.documentElement.style.setProperty('--brand',data.primaryColor||'#2457d6')}
+function esc(v=''){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+function shell(content,cls=''){app.innerHTML=`<section class="center-page"><div class="panel ${cls}">${content}</div></section>`}
+function progress(active,total=6){return `<div class="progress">${Array.from({length:total},(_,i)=>`<span class="${i<active?'active':''}"></span>`).join('')}</div>`}
+function readFields(){document.querySelectorAll('[data-field]').forEach(el=>{data[el.dataset.field]=el.type==='checkbox'?el.checked:(el.value??'').trim()})}
+function goto(name){screen=name;render();window.scrollTo({top:0,behavior:'smooth'})}
+function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),1800)}
+function monthEnd(period){const[y,m]=period.split('-').map(Number);return new Date(y,m,0,12)}
+function toInput(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+function adjustWeekend(d){const x=new Date(d);if(data.weekendRule==='Keep Original Date')return x;if(data.weekendRule==='Previous Friday'){if(x.getDay()===6)x.setDate(x.getDate()-1);if(x.getDay()===0)x.setDate(x.getDate()-2)}if(data.weekendRule==='Next Monday'){if(x.getDay()===6)x.setDate(x.getDate()+2);if(x.getDay()===0)x.setDate(x.getDate()+1)}return x}
+function invoiceDate(){if(data.invoiceRule==='Manual')return null;const[y,m]=data.billingPeriod.split('-').map(Number);if(data.invoiceRule==='Fixed Day'){const max=new Date(y,m,0).getDate();return adjustWeekend(new Date(y,m-1,Math.min(Number(data.fixedInvoiceDay||1),max),12))}if(data.invoiceRule==='Last Calendar Day')return monthEnd(data.billingPeriod);return adjustWeekend(monthEnd(data.billingPeriod))}
+function sendDate(){const inv=invoiceDate();if(!inv||data.sendRule==='Manual')return inv;if(data.sendRule==='Previous Day'){const x=new Date(inv);x.setDate(x.getDate()-1);return adjustWeekend(x)}return inv}
+function formatDate(d){if(!d)return 'Manual';const v=toInput(d);if(data.dateFormat==='YYYY-MM-DD')return v;const[y,m,day]=v.split('-');if(data.dateFormat==='MM/DD/YYYY')return `${m}/${day}/${y}`;if(data.dateFormat==='DD/MM/YYYY')return `${day}/${m}/${y}`;return new Intl.DateTimeFormat(data.language==='French'?'fr-CA':data.language==='Chinese'?'zh-CN':'en-CA',{month:'long',day:'numeric',year:'numeric'}).format(d)}
+function formatPeriod(){const[y,m]=data.billingPeriod.split('-').map(Number);return new Intl.DateTimeFormat(data.language==='Chinese'?'zh-CN':'en-CA',{month:'long',year:'numeric'}).format(new Date(y,m-1,1))}
+function nextNumber(offset=1){return `${data.invoicePrefix||''}${(Number(data.previousInvoiceNumber)||0)+offset}`}
+function renderWelcome(){shell(`<div class="brand-mark">RL</div><div class="eyebrow" style="margin-top:22px">RUNLU</div><h1 class="hero-title">Invoice<br>Automation</h1><p class="subtle">Built for recurring service businesses. Set up once, then prepare each billing cycle with fewer repeated steps.</p><div class="feature-list"><div class="feature"><span class="check">✓</span>Setup in under 5 minutes</div><div class="feature"><span class="check">✓</span>Your data stays on your device</div><div class="feature"><span class="check">✓</span>Flexible billing rules and dates</div></div><div class="actions"><button class="primary" id="start">Get Started</button><button class="restore-link" id="restore">Restore a workspace backup</button></div><p class="small">Version 1.0 Alpha · Build003</p>`, 'welcome-panel');document.getElementById('start').onclick=()=>goto('workspace');document.getElementById('restore').onclick=restoreBackup}
+function renderWorkspace(){shell(`${progress(1)}<div class="eyebrow">Step 1 of 6</div><h2>Create your workspace</h2><p class="subtle">Give this workspace a name. It can match your company name or any name that helps you recognize it.</p><div class="form-grid"><div class="field"><label>Workspace name *</label><input data-field="workspaceName" value="${esc(data.workspaceName)}" placeholder="Example: ABC Cleaning" autofocus></div></div><div class="actions"><button class="primary" id="next">Continue</button><button class="ghost" id="back">Back</button></div>`);document.getElementById('next').onclick=()=>{const i=document.querySelector('[data-field="workspaceName"]');if(!i.value.trim()){i.focus();i.setCustomValidity('Workspace name is required.');i.reportValidity();i.setCustomValidity('');return}readFields();data.companyName||=data.workspaceName;goto('profile')};document.getElementById('back').onclick=()=>goto('welcome')}
+function renderProfile(){shell(`${progress(2)}<div class="eyebrow">Step 2 of 6</div><h2>Business profile</h2><p class="subtle">Enter the business details that will appear on invoices and documents.</p><div class="section-card"><h3>Company</h3><div class="form-grid"><div class="field"><label>Company name *</label><input data-field="companyName" value="${esc(data.companyName)}"></div><div class="grid-2"><div class="field"><label>Legal name</label><input data-field="legalName" value="${esc(data.legalName)}"></div><div class="field"><label>Business number</label><input data-field="businessNumber" value="${esc(data.businessNumber)}"></div></div><div class="field"><label>Tax number</label><input data-field="taxNumber" value="${esc(data.taxNumber)}"></div></div></div><div class="section-card"><h3>Contact</h3><div class="form-grid"><div class="grid-2"><div class="field"><label>Email</label><input type="email" data-field="email" value="${esc(data.email)}"></div><div class="field"><label>Phone</label><input data-field="phone" value="${esc(data.phone)}"></div></div><div class="field"><label>Website</label><input data-field="website" value="${esc(data.website)}"></div></div></div><div class="section-card"><h3>Address</h3><div class="form-grid"><div class="field"><label>Street address</label><input data-field="address" value="${esc(data.address)}"></div><div class="grid-2"><div class="field"><label>City</label><input data-field="city" value="${esc(data.city)}"></div><div class="field"><label>Province / State</label><input data-field="region" value="${esc(data.region)}"></div></div><div class="field"><label>Postal code</label><input data-field="postalCode" value="${esc(data.postalCode)}"></div></div></div><div class="actions"><button class="primary" id="next">Continue</button><button class="ghost" id="back">Back</button></div>`);document.getElementById('next').onclick=()=>{const i=document.querySelector('[data-field="companyName"]');if(!i.value.trim()){i.focus();i.setCustomValidity('Company name is required.');i.reportValidity();i.setCustomValidity('');return}readFields();goto('brand')};document.getElementById('back').onclick=()=>goto('workspace')}
+function renderBrand(){const logo=data.logo?`<img src="${data.logo}" alt="Logo preview">`:'Logo preview';shell(`${progress(3)}<div class="eyebrow">Step 3 of 6</div><h2>Brand identity</h2><p class="subtle">Upload a logo and choose a primary color. Both can be changed later.</p><div class="form-grid"><div class="field"><label>Business logo</label><div class="logo-preview">${logo}</div><input type="file" id="logoInput" accept="image/*"></div><div class="field"><label>Primary color</label><div class="color-row">${['#2457d6','#0f766e','#7c3aed','#111827','#b42318'].map(c=>`<button type="button" class="color-swatch ${data.primaryColor===c?'selected':''}" data-color="${c}" style="background:${c}" aria-label="${c}"></button>`).join('')}</div></div></div><div class="actions"><button class="primary" id="next">Continue</button><button class="ghost" id="back">Back</button></div>`);document.querySelectorAll('[data-color]').forEach(b=>b.onclick=()=>{data.primaryColor=b.dataset.color;applyBrand();renderBrand()});document.getElementById('logoInput').onchange=e=>{const f=e.target.files?.[0];if(!f)return;if(f.size>2_000_000){alert('Please choose an image smaller than 2 MB.');return}const r=new FileReader();r.onload=()=>{data.logo=r.result;renderBrand()};r.readAsDataURL(f)};document.getElementById('next').onclick=()=>goto('regional');document.getElementById('back').onclick=()=>goto('profile')}
+function selectOptions(values,current){return values.map(v=>`<option ${v===current?'selected':''}>${v}</option>`).join('')}
+function renderRegional(){shell(`${progress(4)}<div class="eyebrow">Step 4 of 6</div><h2>Regional settings</h2><p class="subtle">Choose the defaults used for currency, language and dates.</p><div class="form-grid"><div class="grid-2"><div class="field"><label>Country</label><select data-field="country">${selectOptions(['Canada','United States','United Kingdom','Australia','Other'],data.country)}</select></div><div class="field"><label>Currency</label><select data-field="currency">${selectOptions(['CAD','USD','GBP','AUD','EUR'],data.currency)}</select></div></div><div class="grid-2"><div class="field"><label>Language</label><select data-field="language">${selectOptions(['English','French','Chinese'],data.language)}</select></div><div class="field"><label>Date format</label><select data-field="dateFormat">${selectOptions(['MMMM D, YYYY','YYYY-MM-DD','MM/DD/YYYY','DD/MM/YYYY'],data.dateFormat)}</select></div></div></div><div class="actions"><button class="primary" id="next">Continue</button><button class="ghost" id="back">Back</button></div>`);document.getElementById('next').onclick=()=>{readFields();goto('billing')};document.getElementById('back').onclick=()=>goto('brand')}
+function renderBilling(){shell(`${progress(5)}<div class="eyebrow">Step 5 of 6</div><h2>Billing preferences</h2><p class="subtle">Set the rules that determine the billing period, invoice date, send date and numbering.</p><div class="rule-grid"><div class="rule-card"><div class="field"><label>Billing cycle</label><select data-field="billingCycle">${selectOptions(['Monthly','Weekly','Bi-weekly','Quarterly','Yearly'],data.billingCycle)}</select></div></div><div class="rule-card"><div class="field"><label>Billing period</label><input type="month" data-field="billingPeriod" value="${esc(data.billingPeriod)}"></div></div><div class="rule-card"><div class="field"><label>Invoice rule</label><select id="invoiceRule" data-field="invoiceRule">${selectOptions(['Last Business Day','Last Calendar Day','Fixed Day','Manual'],data.invoiceRule)}</select></div><div class="field" id="fixedDayWrap"><label>Fixed day</label><input type="number" min="1" max="31" data-field="fixedInvoiceDay" value="${esc(data.fixedInvoiceDay)}"></div></div><div class="rule-card"><div class="field"><label>Send rule</label><select data-field="sendRule">${selectOptions(['Same Day','Previous Day','Manual'],data.sendRule)}</select></div></div><div class="rule-card"><div class="field"><label>Weekend rule</label><select data-field="weekendRule">${selectOptions(['Previous Friday','Next Monday','Keep Original Date'],data.weekendRule)}</select></div></div><div class="rule-card"><div class="field"><label>Holiday rule</label><select data-field="holidayRule">${selectOptions(['Previous Business Day','Next Business Day','Keep Original Date'],data.holidayRule)}</select></div></div><div class="rule-card"><div class="field"><label>Reminder days before</label><input type="number" min="0" max="30" data-field="reminderDays" value="${esc(data.reminderDays)}"></div><div class="field"><label>Reminder time</label><input type="time" data-field="reminderTime" value="${esc(data.reminderTime)}"></div></div><div class="rule-card"><div class="field"><label>Invoice prefix</label><input data-field="invoicePrefix" value="${esc(data.invoicePrefix)}" placeholder="Optional: INV-"></div><div class="field"><label>Previous invoice number</label><input type="number" min="0" data-field="previousInvoiceNumber" value="${esc(data.previousInvoiceNumber)}"></div></div></div><div class="actions"><button class="primary" id="next">Preview automation</button><button class="ghost" id="back">Back</button></div>`);const toggle=()=>{document.getElementById('fixedDayWrap').classList.toggle('hidden',document.getElementById('invoiceRule').value!=='Fixed Day')};toggle();document.getElementById('invoiceRule').onchange=toggle;document.getElementById('next').onclick=()=>{readFields();goto('preview')};document.getElementById('back').onclick=()=>goto('regional')}
+function previewMarkup(){const inv=invoiceDate(),send=sendDate();return `<div class="preview-card"><div class="eyebrow" style="color:rgba(255,255,255,.75)">Automation preview</div><h2 style="margin-top:7px">${esc(data.workspaceName||data.companyName)}</h2><p class="subtle">This is how RUNLU currently understands your billing setup.</p><div class="preview-grid"><div><span>Billing period</span><strong>${esc(formatPeriod())}</strong></div><div><span>Billing cycle</span><strong>${esc(data.billingCycle)}</strong></div><div><span>Invoice date</span><strong>${esc(formatDate(inv))}</strong></div><div><span>Send date</span><strong>${esc(formatDate(send))}</strong></div><div><span>Next invoice</span><strong>${esc(nextNumber(1))}</strong></div><div><span>Following invoice</span><strong>${esc(nextNumber(2))}</strong></div></div></div>`}
+function renderPreview(){shell(`${progress(6)}<div class="eyebrow">Step 6 of 6</div><h2>Review your setup</h2><p class="subtle">Check the automation preview before creating your workspace.</p><div style="margin-top:22px">${previewMarkup()}</div><div class="actions"><button class="primary" id="finish">Create Workspace</button><button class="ghost" id="back">Back</button></div>`);document.getElementById('finish').onclick=()=>{save();goto('dashboard')};document.getElementById('back').onclick=()=>goto('billing')}
+function logoMarkup(){return data.logo?`<img src="${data.logo}" alt="${esc(data.companyName)} logo">`:esc((data.companyName||'RL').slice(0,2).toUpperCase())}
+function renderDashboard(){applyBrand();const inv=invoiceDate(),send=sendDate();app.innerHTML=`<header class="topbar"><div class="company"><div class="company-logo">${logoMarkup()}</div><div><strong>${esc(data.workspaceName||data.companyName)}</strong><div class="small">RUNLU Invoice Automation</div></div></div><button class="icon-btn" id="settings">⚙</button></header><section class="dashboard-hero"><div class="eyebrow" style="color:rgba(255,255,255,.78)">Today</div><h2 style="margin-top:6px">Workspace ready</h2><p class="subtle">Your business profile and billing rules are configured. Customer Manager is the next product module.</p></section><section class="cards"><article class="card"><div class="card-row"><div><div class="eyebrow">Current billing period</div><h2 style="margin-top:5px">${esc(formatPeriod())}</h2></div><span class="status">Ready</span></div><div class="summary-grid"><div><span>Billing cycle</span><strong>${esc(data.billingCycle)}</strong></div><div><span>Invoice date</span><strong>${esc(formatDate(inv))}</strong></div><div><span>Send date</span><strong>${esc(formatDate(send))}</strong></div><div><span>Reminder</span><strong>${esc(data.reminderDays)} days before · ${esc(data.reminderTime)}</strong></div></div><div class="toolbar"><button class="secondary" id="editBilling">Edit billing preferences</button><button class="ghost" id="viewPreview">View automation preview</button></div></article><article class="card"><div class="card-row"><div><strong>Next invoice numbers</strong><p class="small">Automatically calculated from your previous number.</p></div><span class="status">${esc(nextNumber(1))}</span></div><div class="summary-grid"><div><span>Next</span><strong>${esc(nextNumber(1))}</strong></div><div><span>Following</span><strong>${esc(nextNumber(2))}</strong></div></div></article><article class="card"><div class="card-row"><div><strong>Business profile</strong><p class="small">${esc(data.country)} · ${esc(data.currency)} · ${esc(data.dateFormat)}</p></div><span class="status">Ready</span></div><div class="toolbar"><button class="secondary" id="editProfile">Edit business profile</button><button class="ghost" id="export">Export backup</button></div></article><article class="card"><div style="text-align:center;padding:8px 4px"><h2>No customers yet</h2><p class="subtle">The next build will add customer profiles and recurring service schedules.</p><button class="secondary" id="nextModule">Preview next module</button></div></article></section>`;document.getElementById('settings').onclick=()=>goto('configuration');document.getElementById('editBilling').onclick=()=>goto('billing');document.getElementById('viewPreview').onclick=()=>goto('preview');document.getElementById('editProfile').onclick=()=>goto('profile');document.getElementById('export').onclick=exportBackup;document.getElementById('nextModule').onclick=()=>alert('Next module: Customer Manager + recurring service schedules.')}
+function renderConfiguration(){app.innerHTML=`<header class="topbar"><div><div class="eyebrow">Configuration Center</div><h2 style="margin-top:5px">Workspace settings</h2></div><button class="icon-btn" id="close">✕</button></header><section class="cards"><article class="card config-list"><div class="config-item"><div><strong>Business profile</strong><div class="small">Company, contact and address</div></div><button class="secondary" id="profile">Edit</button></div><div class="config-item"><div><strong>Brand identity</strong><div class="small">Logo and primary color</div></div><button class="secondary" id="brand">Edit</button></div><div class="config-item"><div><strong>Regional settings</strong><div class="small">Country, currency, language and date format</div></div><button class="secondary" id="regional">Edit</button></div><div class="config-item"><div><strong>Billing preferences</strong><div class="small">Cycle, dates, reminders and numbering</div></div><button class="secondary" id="billing">Edit</button></div><div class="config-item"><div><strong>Backup</strong><div class="small">Export or restore your workspace</div></div><button class="secondary" id="backup">Export</button></div><div class="config-item"><div><strong>Reset workspace</strong><div class="small">Delete local setup and start again</div></div><button class="danger" id="reset">Reset</button></div></article></section>`;document.getElementById('close').onclick=()=>goto('dashboard');document.getElementById('profile').onclick=()=>goto('profile');document.getElementById('brand').onclick=()=>goto('brand');document.getElementById('regional').onclick=()=>goto('regional');document.getElementById('billing').onclick=()=>goto('billing');document.getElementById('backup').onclick=exportBackup;document.getElementById('reset').onclick=()=>{if(confirm('Reset this workspace and remove local data?')){localStorage.removeItem(STORAGE_KEY);data={...defaults};goto('welcome')}}}
+function exportBackup(){save();const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='runlu-invoice-workspace-build003.json';a.click();URL.revokeObjectURL(a.href);toast('Workspace backup exported.')}
+function restoreBackup(){const input=document.createElement('input');input.type='file';input.accept='application/json,.json';input.onchange=e=>{const file=e.target.files?.[0];if(!file)return;const r=new FileReader();r.onload=()=>{try{data={...defaults,...JSON.parse(r.result)};save();goto('dashboard');toast('Workspace restored.')}catch{alert('This backup file could not be read.')}};r.readAsText(file)};input.click()}
+function render(){applyBrand();if(screen==='welcome')renderWelcome();else if(screen==='workspace')renderWorkspace();else if(screen==='profile')renderProfile();else if(screen==='brand')renderBrand();else if(screen==='regional')renderRegional();else if(screen==='billing')renderBilling();else if(screen==='preview')renderPreview();else if(screen==='configuration')renderConfiguration();else renderDashboard()}
+render();if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('service-worker.js').catch(()=>{});
 })();
