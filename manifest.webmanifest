@@ -1,0 +1,9 @@
+{
+  "name": "RUNLU Invoice Automation",
+  "short_name": "RUNLU Invoice",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#2457d6",
+  "icons": [{"src":"assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
