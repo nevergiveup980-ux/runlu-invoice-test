@@ -1,11 +1,23 @@
-RUNLU Universal Invoice V1.0 Build016
+RUNLU Universal Invoice
+Version 1.0 · Build017 · Generic Clean
 
-Changes:
-- Restored the professional welcome/startup screen.
-- Added the supplied RUNLU oval logo to the startup screen.
-- Added a Home button to return to the startup screen.
-- Removed hard-coded July 2026 and invoice number 266 defaults.
-- Invoice month initializes from the device's current month.
-- Previous invoice number starts blank and must be entered before generation.
-- Added safeguards to prevent undefined / NaN workspace dates.
-- Preserved the Build014 invoice, email, calendar, review, history, and local-storage features.
+Purpose
+-------
+A clean universal invoice template for recurring-service businesses.
+
+Build017 changes
+----------------
+1. No month/year is shown on first open.
+2. The user must explicitly select a Billing Period before a month appears.
+3. Removed the fixed August 2026 pricing rule and all fixed price defaults.
+4. Removed old customer/business names from the embedded Word templates.
+5. Replaced old business branding inside Word templates with neutral placeholders.
+6. Replaced the embedded document logo with the generic RUNLU universal logo.
+7. Removed legacy GIMEX image assets and renamed external invoice templates generically.
+8. Existing core workflow remains: business setup, client profiles, Word generation,
+   email preparation, reminders, history, and local-device storage.
+
+Notes
+-----
+Internal legacy variable names are intentionally retained in Build017 to minimize
+regression risk. They are not shown to users and can be refactored in a later build.
